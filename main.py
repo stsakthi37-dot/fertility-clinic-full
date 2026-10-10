@@ -18,7 +18,7 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -1047,16 +1047,44 @@ async def get_activity(user=Depends(current_user)):
 app.include_router(api_router, prefix="/api")
 app.include_router(api_router)
 
-# Mount static files if directory exists
+HTML_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#174d48">
+  <link rel="icon" href="data:,">
+  <title>Bloom Clinic — Follow-up Management</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+  <div id="app"><div class="initial-loader">Opening your clinic workspace…</div></div>
+  <dialog id="modal" aria-labelledby="modal-title"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>"""
+
+# Mount static files
 static_dir = BASE / "static"
+if not static_dir.exists():
+    static_dir = BASE / "public" / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 @app.get("/")
+@app.get("/index.html")
+@app.get("/public/index.html")
 def frontend():
-    index_file = BASE / "index.html"
-    if not index_file.exists():
-        index_file = static_dir / "index.html"
-    if index_file.exists():
-        return FileResponse(index_file)
-    return PlainTextResponse("Bloom Clinic API is running.")
+    for candidate in [BASE / "public" / "index.html", BASE / "index.html", BASE / "static" / "index.html"]:
+        if candidate.exists():
+            return FileResponse(candidate)
+    return HTMLResponse(HTML_PAGE)
+
+@app.api_route("/{path_name:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
+async def catch_all(request: Request, path_name: str):
+    # Route non-API, non-static GET requests to the SPA frontend
+    if request.method == "GET" and not path_name.startswith("api/") and not path_name.startswith("static/"):
+        return frontend()
+    return JSONResponse(status_code=404, content={"detail": f"Path '{path_name}' not found"})
+
